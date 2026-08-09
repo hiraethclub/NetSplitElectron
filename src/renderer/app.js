@@ -240,8 +240,8 @@ function updateWindowTitle() {
   for (const server of state.servers) {
     for (const t of server.targets.values()) unread += t.unread;
   }
-  dom.toolbarTitle.textContent = unread > 0 ? `Netsplit (${unread})` : 'Netsplit';
-  document.title = unread > 0 ? `Netsplit (${unread})` : 'Netsplit';
+  dom.toolbarTitle.textContent = unread > 0 ? `NetSplitElectron (${unread})` : 'NetSplitElectron';
+  document.title = unread > 0 ? `NetSplitElectron (${unread})` : 'NetSplitElectron';
 }
 
 function systemMessage(server, targetName, text) {
@@ -738,7 +738,7 @@ function handlePrivmsg(server, msg, isNotice) {
   }
   if (ctcp && !isNotice) {
     // Respond to common CTCP queries; show nothing noisy.
-    if (ctcp.type === 'VERSION') rawSend(server, `NOTICE ${msg.nick} :\x01VERSION Netsplit (Electron)\x01`);
+    if (ctcp.type === 'VERSION') rawSend(server, `NOTICE ${msg.nick} :\x01VERSION NetSplitElectron\x01`);
     else if (ctcp.type === 'PING') rawSend(server, `NOTICE ${msg.nick} :\x01PING ${ctcp.text}\x01`);
     else if (ctcp.type === 'TIME') rawSend(server, `NOTICE ${msg.nick} :\x01TIME ${new Date().toString()}\x01`);
     systemMessage(server, server.name, `[CTCP ${ctcp.type} from ${msg.nick}]`);
@@ -942,7 +942,7 @@ function executeCommand(server, target, input) {
     case 'DISCONNECT':
       server.manualDisconnect = true;
       if (server.reconnectTimer) { clearTimeout(server.reconnectTimer); server.reconnectTimer = null; }
-      window.netsplit.send(server.id, `QUIT :${arg || 'Netsplit'}`);
+      window.netsplit.send(server.id, `QUIT :${arg || 'NetSplitElectron'}`);
       setTimeout(() => window.netsplit.disconnect(server.id), 150);
       break;
     case 'LIST':
@@ -1079,7 +1079,7 @@ function renderConversationHeader() {
   const refs = currentSelectionRefs();
   if (!refs || !refs.target) {
     dom.conversationAvatar.textContent = '#';
-    dom.conversationTitle.textContent = 'Netsplit';
+    dom.conversationTitle.textContent = 'NetSplitElectron';
     dom.conversationSubtitle.textContent = 'Not connected';
     return;
   }
@@ -1637,7 +1637,7 @@ function disconnectServer(server) {
   server.manualDisconnect = true;
   if (server.reconnectTimer) { clearTimeout(server.reconnectTimer); server.reconnectTimer = null; }
   if (server.status === 'connected' || server.status === 'registering') {
-    window.netsplit.send(server.id, 'QUIT :Netsplit');
+    window.netsplit.send(server.id, 'QUIT :NetSplitElectron');
   }
   setTimeout(() => window.netsplit.disconnect(server.id), 150);
 }

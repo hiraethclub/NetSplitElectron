@@ -1,14 +1,15 @@
-# Netsplit (Electron)
+# NetSplitElectron
 
-A cross-platform **Electron port of [Netsplit](https://github.com/richstokes/Netsplit)**,
-the modern macOS IRC client — rebuilt so it runs on **Linux and Windows** while keeping
-the look and feel of the original as close as possible.
+**NetSplitElectron** is a cross-platform **Electron port of
+[Netsplit](https://github.com/richstokes/Netsplit)**, the modern macOS IRC
+client — rebuilt so it runs on **Linux and Windows** while keeping the look and
+feel of the original as close as possible.
 
 The original is a native Swift/SwiftUI app and only runs on macOS. This port
 reproduces its three-pane workspace (connections · transcript · members), its
 16 hand-tuned color themes, and a working IRC core, in a single Electron app.
 
-![Netsplit](docs/screenshot.png)
+![NetSplitElectron](docs/screenshot.png)
 
 ## Status
 

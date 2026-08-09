@@ -51,7 +51,7 @@ function createWindow() {
     minHeight: 480,
     backgroundColor: '#1e1e1e',
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
-    title: 'Netsplit',
+    title: 'NetSplitElectron',
     webPreferences: {
       preload: path.join(__dirname, '..', 'preload', 'preload.js'),
       contextIsolation: true,

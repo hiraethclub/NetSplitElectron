@@ -1,7 +1,7 @@
 {
   "name": "netsplit-electron",
   "version": "0.1.0",
-  "description": "Netsplit — a modern IRC client. Electron port of the macOS app, for Linux and Windows.",
+  "description": "NetSplitElectron — a modern IRC client. Electron port of the macOS Netsplit app, for Linux and Windows.",
   "main": "src/main/main.js",
   "author": "",
   "license": "MIT",
@@ -20,7 +20,7 @@
   },
   "build": {
     "appId": "club.hiraeth.netsplit",
-    "productName": "Netsplit",
+    "productName": "NetSplitElectron",
     "files": [
       "src/**/*",
       "package.json"
