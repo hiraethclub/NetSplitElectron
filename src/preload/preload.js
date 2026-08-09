@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('netsplit', {
   disconnect: (id) => ipcRenderer.invoke('irc:disconnect', { id }),
   openExternal: (url) => ipcRenderer.invoke('irc:openExternal', { url }),
   systemIsDark: () => ipcRenderer.invoke('theme:systemIsDark'),
+  focusWindow: () => ipcRenderer.invoke('window:focus'),
 
   // Socket lifecycle + raw lines from a connection.
   onEvent: (handler) => {

@@ -123,6 +123,21 @@
     </div>
   </div>
 
+  <!-- Channel list browser -->
+  <div class="modal-backdrop" id="listModal" hidden>
+    <div class="modal">
+      <h2 id="listTitle">Channels</h2>
+      <input type="text" id="listFilter" class="member-filter" style="margin:0 0 10px;width:100%" placeholder="Filter channels" autocomplete="off" />
+      <div class="channel-list" id="channelListResults"></div>
+      <div class="modal-actions">
+        <button type="button" class="ghost-btn" id="listClose">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Right-click context menu -->
+  <div class="context-menu" id="contextMenu" hidden></div>
+
   <!-- Command palette -->
   <div class="modal-backdrop palette-backdrop" id="paletteModal" hidden>
     <div class="palette">

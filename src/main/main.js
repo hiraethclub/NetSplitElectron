@@ -117,6 +117,15 @@ ipcMain.handle('theme:systemIsDark', () => {
   return nativeTheme.shouldUseDarkColors;
 });
 
+ipcMain.handle('window:focus', () => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+  }
+  return { ok: true };
+});
+
 // ---------------------------------------------------------------------------
 // App lifecycle
 // ---------------------------------------------------------------------------

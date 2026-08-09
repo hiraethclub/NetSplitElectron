@@ -142,6 +142,7 @@ function addMessage(server, targetName, msg) {
   if (t.messages.length > 2000) t.messages.shift();
 
   const selected = isSelected(server.id, targetName);
+  const focused = selected && document.hasFocus();
   if (selected) {
     appendMessageRow(t, message, true);
   } else if (message.type !== 'system') {
@@ -149,7 +150,43 @@ function addMessage(server, targetName, msg) {
     if (isHighlight(server, message)) t.highlight = true;
     renderSidebar();
   }
+  if (!focused) maybeNotify(server, t, message);
+  updateWindowTitle();
   return message;
+}
+
+// Desktop notification for a direct message or a highlight, when the relevant
+// conversation isn't already in front of the user.
+function maybeNotify(server, target, message) {
+  if (typeof Notification === 'undefined') return;
+  if (message.type === 'system' || message.type === 'self') return;
+  if (isMe(server, message.sender)) return;
+  const isDM = target.kind === 'dm';
+  if (!isDM && !isHighlight(server, message)) return;
+  if (Notification.permission === 'denied') return;
+  const show = () => {
+    try {
+      const title = isDM ? `${message.sender} (DM)` : `${message.sender} in ${target.name}`;
+      const body = message.type === 'action' ? `${message.sender} ${message.text}` : message.text;
+      const n = new Notification(title, { body, silent: false });
+      n.onclick = () => {
+        window.netsplit.focusWindow();
+        selectTarget(server.id, target.name);
+      };
+    } catch (_) { /* ignore */ }
+  };
+  if (Notification.permission === 'granted') show();
+  else Notification.requestPermission().then((p) => { if (p === 'granted') show(); });
+}
+
+// Reflect total unread in the window/tab title.
+function updateWindowTitle() {
+  let unread = 0;
+  for (const server of state.servers) {
+    for (const t of server.targets.values()) unread += t.unread;
+  }
+  dom.toolbarTitle.textContent = unread > 0 ? `Netsplit (${unread})` : 'Netsplit';
+  document.title = unread > 0 ? `Netsplit (${unread})` : 'Netsplit';
 }
 
 function systemMessage(server, targetName, text) {
@@ -159,7 +196,14 @@ function systemMessage(server, targetName, text) {
 function isHighlight(server, message) {
   if (!server.currentNick) return false;
   if (message.type !== 'message' && message.type !== 'action') return false;
-  return lower(message.text).includes(lower(server.currentNick));
+  if (isMe(server, message.sender)) return false; // don't highlight your own lines
+  // Match the nick as a whole token so "rich" doesn't fire on "enriched".
+  const nick = server.currentNick.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  try {
+    return new RegExp(`(^|[^\\w])${nick}([^\\w]|$)`, 'i').test(message.text);
+  } catch (_) {
+    return lower(message.text).includes(lower(server.currentNick));
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -184,6 +228,11 @@ function addServerProfile(profile) {
     currentNick: profile.nick,
     registered: false,
     targets: new Map(),
+    reconnectAttempts: 0,
+    reconnectTimer: null,
+    manualDisconnect: false,
+    channelList: null,       // collected /list results
+    collectingList: false,
   };
   state.servers.push(server);
   serverConsole(server);
@@ -191,6 +240,9 @@ function addServerProfile(profile) {
 }
 
 async function connectServer(server) {
+  if (server.reconnectTimer) { clearTimeout(server.reconnectTimer); server.reconnectTimer = null; }
+  server.manualDisconnect = false;
+  server.reconnectAttempts = 0;
   server.status = 'connecting';
   server.registered = false;
   systemMessage(server, server.name, `Connecting to ${server.host}:${server.port}…`);
@@ -201,6 +253,30 @@ async function connectServer(server) {
     tls: server.tls,
     tlsInsecure: server.tlsInsecure,
   });
+}
+
+// Auto-reconnect with capped exponential backoff after an unexpected drop.
+const MAX_RECONNECT_ATTEMPTS = 6;
+function scheduleReconnect(server) {
+  if (server.manualDisconnect || server.reconnectTimer) return;
+  if (server.reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+    systemMessage(server, server.name, 'Giving up automatic reconnection. Use /connect to retry.');
+    return;
+  }
+  server.reconnectAttempts += 1;
+  const delay = Math.min(3000 * 2 ** (server.reconnectAttempts - 1), 90000);
+  systemMessage(server, server.name,
+    `Reconnecting in ${Math.round(delay / 1000)}s (attempt ${server.reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})…`);
+  server.reconnectTimer = setTimeout(() => {
+    server.reconnectTimer = null;
+    if (server.manualDisconnect) return;
+    server.status = 'connecting';
+    server.registered = false;
+    renderSidebar();
+    window.netsplit.connect(server.id, {
+      host: server.host, port: server.port, tls: server.tls, tlsInsecure: server.tlsInsecure,
+    });
+  }, delay);
 }
 
 function registerConnection(server) {
@@ -233,15 +309,21 @@ window.netsplit.onEvent(({ id, event, payload }) => {
     case 'error':
       systemMessage(server, server.name, `Error: ${payload.message}`);
       break;
-    case 'close':
+    case 'close': {
+      const wasConnected = server.status === 'connected' || server.status === 'registering';
       server.status = 'disconnected';
       server.registered = false;
+      // Clear rosters so a later reconnect rebuilds them from fresh NAMES.
+      for (const t of server.targets.values()) {
+        if (t.kind === 'channel') t.members.clear();
+      }
       systemMessage(server, server.name,
         payload.byClient ? 'Disconnected.' : 'Connection closed.');
-      // Mark channels as parted visually by clearing members.
+      if (!payload.byClient && !server.manualDisconnect && wasConnected) scheduleReconnect(server);
       renderSidebar();
       if (isSelectedServer(server.id)) renderMembers();
       break;
+    }
   }
 });
 
@@ -266,6 +348,7 @@ function handleLine(server, line) {
     case '001': // RPL_WELCOME
       server.status = 'connected';
       server.registered = true;
+      server.reconnectAttempts = 0;
       if (p[0]) server.currentNick = p[0];
       systemMessage(server, server.name, p[1] || 'Connected.');
       autoJoin(server);
@@ -312,11 +395,40 @@ function handleLine(server, line) {
     case '433': // nick in use
       handleNickInUse(server, p);
       break;
-    case 'WHOIS': break;
+    // --- WHOIS replies ---
+    case '311': whoisLine(server, p[1], `${p[1]} is ${p[2]}@${p[3]} (${p[5] || ''})`); break;
+    case '312': whoisLine(server, p[1], `${p[1]} is on ${p[2]} (${p[3] || ''})`); break;
+    case '313': whoisLine(server, p[1], `${p[1]} is an IRC operator`); break;
+    case '317': whoisLine(server, p[1], `${p[1]} has been idle ${p[2]}s`); break;
+    case '319': whoisLine(server, p[1], `${p[1]} is on channels: ${p[2] || ''}`); break;
+    case '330': whoisLine(server, p[1], `${p[1]} ${p[3] || 'is logged in as'} ${p[2]}`); break;
+    case '338': whoisLine(server, p[1], `${p[1]} real host: ${p.slice(2).join(' ')}`); break;
+    case '671': whoisLine(server, p[1], `${p[1]} is using a secure connection`); break;
+    case '301': whoisLine(server, p[1], `${p[1]} is away: ${p[2] || ''}`); break;
+    case '318': break; // end of WHOIS — nothing to print
+    // --- LIST replies ---
+    case '321': server.channelList = []; server.collectingList = true; break;
+    case '322':
+      if (server.collectingList) {
+        server.channelList.push({ name: p[1], users: parseInt(p[2], 10) || 0, topic: stripFormatting(p[3] || '') });
+      }
+      break;
+    case '323':
+      server.collectingList = false;
+      openChannelList(server);
+      break;
     default:
       handleNumericFallback(server, msg);
       break;
   }
+}
+
+function whoisTargetName(server) {
+  if (state.selection && state.selection.serverId === server.id) return state.selection.target;
+  return server.name;
+}
+function whoisLine(server, _nick, text) {
+  systemMessage(server, whoisTargetName(server), text);
 }
 
 function handleNumericFallback(server, msg) {
@@ -416,7 +528,8 @@ function isMe(server, nick) { return lower(nick) === lower(server.currentNick); 
 function handleJoin(server, msg) {
   const channel = msg.params[0];
   if (isMe(server, msg.nick)) {
-    const t = ensureTarget(server, channel, 'channel');
+    ensureTarget(server, channel, 'channel');
+    rememberJoinedChannel(server, channel);
     systemMessage(server, channel, `You joined ${channel}`);
     selectTarget(server.id, channel);
     rawSend(server, `MODE ${channel}`);
@@ -430,11 +543,25 @@ function handlePart(server, msg) {
   const channel = msg.params[0];
   const reason = msg.params[1] ? ` (${msg.params[1]})` : '';
   if (isMe(server, msg.nick)) {
+    forgetJoinedChannel(server, channel);
     systemMessage(server, channel, `You left ${channel}${reason}`);
   } else {
     removeMember(server, channel, msg.nick);
     systemMessage(server, channel, `${msg.nick} left ${channel}${reason}`);
   }
+}
+
+// Keep the set of channels to auto-(re)join in sync with what we're actually in.
+function rememberJoinedChannel(server, channel) {
+  if (!server.channelsToJoin.some((c) => targetKey(c) === targetKey(channel))) {
+    server.channelsToJoin.push(channel);
+    persistServers();
+  }
+}
+function forgetJoinedChannel(server, channel) {
+  const before = server.channelsToJoin.length;
+  server.channelsToJoin = server.channelsToJoin.filter((c) => targetKey(c) !== targetKey(channel));
+  if (server.channelsToJoin.length !== before) persistServers();
 }
 
 function handleQuit(server, msg) {
@@ -719,8 +846,17 @@ function executeCommand(server, target, input) {
       break;
     case 'QUIT':
     case 'DISCONNECT':
+      server.manualDisconnect = true;
+      if (server.reconnectTimer) { clearTimeout(server.reconnectTimer); server.reconnectTimer = null; }
       window.netsplit.send(server.id, `QUIT :${arg || 'Netsplit'}`);
       setTimeout(() => window.netsplit.disconnect(server.id), 150);
+      break;
+    case 'LIST':
+      rawSend(server, arg ? `LIST ${arg}` : 'LIST');
+      systemToast('Requesting channel list…');
+      break;
+    case 'NAMES':
+      rawSend(server, `NAMES ${arg || (target && target.kind === 'channel' ? target.name : '')}`.trim());
       break;
     case 'CONNECT': case 'RECONNECT':
       connectServer(server);
@@ -764,6 +900,7 @@ function renderAll() {
   renderTranscript();
   renderMembers();
   updateComposerState();
+  updateWindowTitle();
 }
 
 function renderSidebar() {
@@ -799,6 +936,10 @@ function renderSidebar() {
     sstack.appendChild(sname); sstack.appendChild(ssub);
     srow.appendChild(dot); srow.appendChild(sstack);
     srow.onclick = () => selectTarget(server.id, server.name);
+    srow.ondblclick = () => {
+      if (!['connected', 'registering', 'connecting'].includes(server.status)) connectServer(server);
+    };
+    srow.oncontextmenu = (e) => showServerMenu(e, server);
     group.appendChild(srow);
 
     // Channels & DMs
@@ -820,6 +961,7 @@ function renderSidebar() {
         row.appendChild(badge);
       }
       row.onclick = () => selectTarget(server.id, t.name);
+      row.oncontextmenu = (e) => showTargetMenu(e, server, t);
       group.appendChild(row);
     }
     frag.appendChild(group);
@@ -918,10 +1060,22 @@ function buildMessageRow(server, message) {
     renderBody(body, message.text);
   }
 
+  // Make a real sender's nick clickable: opens a direct message with them.
+  if (message.sender && message.type !== 'system' && !isMe(server, message.sender)) {
+    nick.classList.add('clickable-nick');
+    nick.title = `Message ${message.sender}`;
+    nick.onclick = () => openQuery(server, message.sender);
+  }
+
   row.appendChild(time);
   row.appendChild(nick);
   row.appendChild(body);
   return row;
+}
+
+function openQuery(server, nickname) {
+  ensureTarget(server, nickname, 'dm');
+  selectTarget(server.id, nickname);
 }
 
 function nickColor(key) {
@@ -1019,7 +1173,8 @@ function buildMemberRow(server, m) {
     badge.textContent = ROLE_NAMES[top];
     row.appendChild(badge);
   }
-  row.ondblclick = () => { selectTarget(server.id, m.nickname); };
+  row.ondblclick = () => openQuery(server, m.nickname);
+  row.oncontextmenu = (e) => showMemberMenu(e, server, m);
   return row;
 }
 
@@ -1065,9 +1220,10 @@ function wireUI() {
   dom.sendBtn.onclick = sendComposer;
   dom.composerInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendComposer(); }
-    else if (e.key === 'ArrowUp' && !dom.composerInput.value) { recallHistory(-1); e.preventDefault(); }
-    else if (e.key === 'ArrowDown') { recallHistory(1); }
-    else if (e.key === 'Tab') { e.preventDefault(); nickComplete(); }
+    else if (e.key === 'ArrowUp') { recallHistory(-1); e.preventDefault(); }
+    else if (e.key === 'ArrowDown') { recallHistory(1); e.preventDefault(); }
+    else if (e.key === 'Tab') { e.preventDefault(); tabComplete(); }
+    else { resetHistoryCursor(); }
   });
 
   // Add connection
@@ -1103,8 +1259,14 @@ function wireUI() {
   });
   document.addEventListener('keydown', (e) => {
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); openPalette(); }
-    if (e.key === 'Escape') { closeAllModals(); }
+    if (e.key === 'Escape') { closeAllModals(); hideContextMenu(); }
   });
+
+  // Dismiss the context menu on any outside interaction.
+  document.addEventListener('click', hideContextMenu);
+  document.addEventListener('scroll', hideContextMenu, true);
+  window.addEventListener('blur', hideContextMenu);
+  el('listClose').onclick = () => closeModal('listModal');
 
   // Nav (channel switching by keyboard: Cmd+Ctrl+arrow could be added; keep simple)
   el('navBack').onclick = () => cycleSelection(-1);
@@ -1115,7 +1277,8 @@ function wireUI() {
 }
 
 function closeAllModals() {
-  closeModal('connectModal'); closeModal('themeModal'); closeModal('paletteModal');
+  closeModal('connectModal'); closeModal('themeModal');
+  closeModal('paletteModal'); closeModal('listModal');
 }
 
 function openConnectModal() {
@@ -1170,6 +1333,144 @@ function openThemeModal() {
     grid.appendChild(sw);
   }
   el('themeModal').hidden = false;
+}
+
+// --- Channel list browser (/list) ---
+function openChannelList(server) {
+  const list = server.channelList || [];
+  el('listTitle').textContent = `Channels on ${server.name} (${list.length})`;
+  const filter = el('listFilter');
+  filter.value = '';
+  const render = () => {
+    const q = lower(filter.value.trim());
+    const shown = list
+      .filter((c) => !q || lower(c.name).includes(q) || lower(c.topic).includes(q))
+      .sort((a, b) => b.users - a.users)
+      .slice(0, 500);
+    const frag = document.createDocumentFragment();
+    if (!shown.length) {
+      const e = document.createElement('div');
+      e.className = 'channel-list-empty';
+      e.textContent = list.length ? 'No channels match your filter.' : 'No channels returned.';
+      frag.appendChild(e);
+    }
+    for (const c of shown) {
+      const row = document.createElement('div');
+      row.className = 'channel-list-row';
+      const name = document.createElement('span'); name.className = 'cl-name'; name.textContent = c.name;
+      const users = document.createElement('span'); users.className = 'cl-users'; users.textContent = `${c.users}`;
+      const topic = document.createElement('span'); topic.className = 'cl-topic'; topic.textContent = c.topic;
+      row.appendChild(name); row.appendChild(users); row.appendChild(topic);
+      row.onclick = () => { rawSend(server, `JOIN ${c.name}`); closeModal('listModal'); };
+      frag.appendChild(row);
+    }
+    el('channelListResults').replaceChildren(frag);
+  };
+  filter.oninput = render;
+  render();
+  el('listModal').hidden = false;
+  filter.focus();
+}
+
+// --- Context menu ---
+function showContextMenu(e, items) {
+  e.preventDefault();
+  const menu = el('contextMenu');
+  menu.replaceChildren();
+  for (const item of items) {
+    if (item.sep) {
+      const s = document.createElement('div'); s.className = 'context-menu-sep';
+      menu.appendChild(s); continue;
+    }
+    const row = document.createElement('div');
+    row.className = 'context-menu-item' + (item.danger ? ' danger' : '');
+    row.textContent = item.label;
+    row.onclick = () => { hideContextMenu(); item.action(); };
+    menu.appendChild(row);
+  }
+  menu.hidden = false;
+  const rect = menu.getBoundingClientRect();
+  let x = e.clientX, y = e.clientY;
+  if (x + rect.width > window.innerWidth) x = window.innerWidth - rect.width - 8;
+  if (y + rect.height > window.innerHeight) y = window.innerHeight - rect.height - 8;
+  menu.style.left = Math.max(4, x) + 'px';
+  menu.style.top = Math.max(4, y) + 'px';
+}
+function hideContextMenu() { el('contextMenu').hidden = true; }
+
+function showServerMenu(e, server) {
+  const busy = ['connected', 'registering', 'connecting'].includes(server.status);
+  const items = [];
+  if (busy) {
+    items.push({ label: 'Disconnect', action: () => disconnectServer(server) });
+    items.push({ label: 'Reconnect', action: () => { disconnectServer(server); setTimeout(() => connectServer(server), 400); } });
+  } else {
+    items.push({ label: 'Connect', action: () => connectServer(server) });
+  }
+  items.push({ label: 'Join Channel…', action: () => { selectTarget(server.id, server.name); dom.composerInput.value = '/join '; dom.composerInput.focus(); } });
+  items.push({
+    label: 'List Channels',
+    action: () => {
+      if (server.status === 'connected') { rawSend(server, 'LIST'); systemToast('Requesting channel list…'); }
+      else systemToast('Connect to the server first.');
+    },
+  });
+  items.push({ sep: true });
+  items.push({ label: 'Remove Server', danger: true, action: () => removeServer(server) });
+  showContextMenu(e, items);
+}
+
+function showTargetMenu(e, server, target) {
+  const items = [];
+  if (target.kind === 'channel' && server.status === 'connected') {
+    items.push({ label: 'Leave Channel', action: () => rawSend(server, `PART ${target.name}`) });
+  }
+  items.push({ label: 'Clear Messages', action: () => { target.messages = []; if (isSelected(server.id, target.name)) renderTranscript(); } });
+  items.push({ sep: true });
+  items.push({ label: 'Close', danger: true, action: () => closeTarget(server, target) });
+  showContextMenu(e, items);
+}
+
+function showMemberMenu(e, server, member) {
+  showContextMenu(e, [
+    { label: `Message ${member.nickname}`, action: () => openQuery(server, member.nickname) },
+    { label: 'Whois', action: () => { if (server.status === 'connected') rawSend(server, `WHOIS ${member.nickname}`); } },
+    { sep: true },
+    { label: 'Copy nick', action: () => { try { navigator.clipboard.writeText(member.nickname); } catch (_) {} } },
+  ]);
+}
+
+function disconnectServer(server) {
+  server.manualDisconnect = true;
+  if (server.reconnectTimer) { clearTimeout(server.reconnectTimer); server.reconnectTimer = null; }
+  if (server.status === 'connected' || server.status === 'registering') {
+    window.netsplit.send(server.id, 'QUIT :Netsplit');
+  }
+  setTimeout(() => window.netsplit.disconnect(server.id), 150);
+}
+
+function removeServer(server) {
+  disconnectServer(server);
+  const idx = state.servers.findIndex((s) => s.id === server.id);
+  if (idx !== -1) state.servers.splice(idx, 1);
+  persistServers();
+  if (state.selection && state.selection.serverId === server.id) {
+    state.selection = state.servers.length
+      ? { serverId: state.servers[0].id, target: state.servers[0].name } : null;
+  }
+  renderAll();
+}
+
+function closeTarget(server, target) {
+  if (target.kind === 'channel') {
+    if (server.status === 'connected') rawSend(server, `PART ${target.name}`);
+    forgetJoinedChannel(server, target.name);
+  }
+  server.targets.delete(targetKey(target.name));
+  if (isSelected(server.id, target.name)) {
+    state.selection = { serverId: server.id, target: server.name };
+  }
+  renderAll();
 }
 
 // --- Command palette (⌘K jump) ---
@@ -1251,30 +1552,65 @@ function cycleSelection(dir) {
   selectTarget(list[idx].serverId, list[idx].target);
 }
 
-// --- Composer history + nick completion ---
+// --- Composer history + tab completion ---
 const history = [];
-let historyIndex = -1;
-function recordHistory(text) { history.push(text); if (history.length > 100) history.shift(); historyIndex = history.length; }
+let historyIndex = 0;
+function recordHistory(text) { history.push(text); if (history.length > 200) history.shift(); historyIndex = history.length; }
+function resetHistoryCursor() { historyIndex = history.length; }
 function recallHistory(dir) {
   if (!history.length) return;
   historyIndex = Math.max(0, Math.min(history.length, historyIndex + dir));
   dom.composerInput.value = history[historyIndex] || '';
+  // Put the caret at the end after recall.
+  const len = dom.composerInput.value.length;
+  requestAnimationFrame(() => dom.composerInput.setSelectionRange(len, len));
 }
 
-function nickComplete() {
-  const refs = currentSelectionRefs();
-  if (!refs || !refs.target || refs.target.kind !== 'channel') return;
+const COMMAND_NAMES = [
+  'server', 'connect', 'join', 'part', 'msg', 'query', 'me', 'notice', 'nick',
+  'topic', 'whois', 'who', 'mode', 'kick', 'invite', 'away', 'back', 'list',
+  'names', 'clear', 'raw', 'quit', 'disconnect',
+];
+
+let completionState = null; // { base, matches, index }
+
+function tabComplete() {
   const input = dom.composerInput;
   const value = input.value;
+
+  // Command-name completion: first token beginning with "/".
+  const cmdMatch = value.match(/^\/(\S*)$/);
+  if (cmdMatch) {
+    cycleCompletion(value, '/' + cmdMatch[1], COMMAND_NAMES.map((c) => '/' + c), ' ');
+    return;
+  }
+
+  // Nick completion for the trailing token in a channel.
+  const refs = currentSelectionRefs();
+  if (!refs || !refs.target || refs.target.kind !== 'channel') return;
   const m = value.match(/(\S+)$/);
   if (!m) return;
-  const partial = lower(m[1]);
   const names = Array.from(refs.target.members.values()).map((x) => x.nickname);
-  const match = names.find((n) => lower(n).startsWith(partial));
-  if (match) {
-    const prefix = value.slice(0, value.length - m[1].length);
-    input.value = prefix + match + (prefix.length === 0 ? ': ' : ' ');
+  const atStart = value.length === m[1].length;
+  cycleCompletion(value, m[1], names, atStart ? ': ' : ' ');
+}
+
+// Shared tab-cycling: repeated Tab rotates through all matches of `token`.
+function cycleCompletion(fullValue, token, pool, suffix) {
+  const partial = lower(token);
+  if (!completionState || completionState.raw !== fullValue) {
+    const matches = pool.filter((n) => lower(n).startsWith(partial));
+    if (!matches.length) { completionState = null; return; }
+    completionState = { base: fullValue.slice(0, fullValue.length - token.length), matches, index: 0 };
+  } else {
+    completionState.index = (completionState.index + 1) % completionState.matches.length;
   }
+  const chosen = completionState.matches[completionState.index];
+  const newValue = completionState.base + chosen + suffix;
+  dom.composerInput.value = newValue;
+  completionState.raw = newValue;
+  const len = newValue.length;
+  requestAnimationFrame(() => dom.composerInput.setSelectionRange(len, len));
 }
 
 // ---------------------------------------------------------------------------

@@ -38,8 +38,19 @@ follow-ups below.
   `/server irc.libera.chat` opens a network, then `/join #channel` from the
   server console — no dialog required.
 - **Command palette** (⌘/Ctrl+K) to jump between servers, channels, and DMs.
-- **Composer niceties**: input history (↑/↓), tab nickname completion, link
-  detection that opens in the system browser.
+- **Channel browser**: `/list` opens a searchable, sortable list of the network's
+  channels; click one to join.
+- **Right-click management**: connect / disconnect / reconnect / remove a server,
+  leave or close a channel or DM, whois or message a member. Double-click a
+  server row to (re)connect.
+- **Auto-reconnect** with capped exponential backoff after an unexpected drop;
+  channels you were in are rejoined automatically.
+- **Desktop notifications** for direct messages and mentions when the window
+  isn't focused; unread counts appear in the window title. Mentions are matched
+  on whole-word nick boundaries.
+- **Composer niceties**: input history (↑/↓), Tab completion for both command
+  names and nicknames (repeat Tab to cycle), click a nickname to open a DM, and
+  link detection that opens in the system browser.
 - **Demo Server** — an offline sample network (File → Load Demo Server) so you
   can preview the client without connecting.
 
