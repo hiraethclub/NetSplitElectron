@@ -217,7 +217,7 @@ function applyTheme(key, systemIsDark) {
   return p;
 }
 
-const api = { THEMES, THEME_ORDER, applyTheme, nicknameColor, resolveThemeKey };
+const api = { THEMES, THEME_ORDER, FONT_STACKS, applyTheme, nicknameColor, resolveThemeKey };
 if (typeof window !== 'undefined') window.NetsplitThemes = api;
 if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })();

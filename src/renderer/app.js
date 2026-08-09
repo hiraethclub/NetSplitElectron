@@ -20,7 +20,49 @@ const state = {
   themeKey: 'dark',
   palette: null,
   membersVisible: true,
+  settings: {
+    spacing: 'comfortable',   // 'compact' | 'comfortable'
+    chatFont: 'system',       // 'system' | 'rounded' | 'monospaced'
+    clock: '12h',             // '12h' | '24h'
+    showTimestamps: true,
+    coloredNicks: true,
+    notifications: true,
+  },
 };
+
+const SETTING_FIELDS = {
+  spacing: ['comfortable', 'compact'],
+  chatFont: ['system', 'rounded', 'monospaced'],
+  clock: ['12h', '24h'],
+  showTimestamps: [true, false],
+  coloredNicks: [true, false],
+  notifications: [true, false],
+};
+
+function loadSettings() {
+  try {
+    const raw = localStorage.getItem('netsplit.settings');
+    if (raw) Object.assign(state.settings, JSON.parse(raw));
+  } catch (_) { /* ignore */ }
+}
+function saveSettings() {
+  savePref('netsplit.settings', JSON.stringify(state.settings));
+}
+
+// Map chatFont choice to the shared font stacks (system → the theme's design).
+function chatFontStack() {
+  const fs = Themes.FONT_STACKS;
+  if (state.settings.chatFont === 'rounded') return fs.rounded;
+  if (state.settings.chatFont === 'monospaced') return fs.monospaced;
+  return 'var(--font-stack)';
+}
+
+function applySettings() {
+  const t = dom.transcript;
+  t.classList.toggle('compact', state.settings.spacing === 'compact');
+  t.classList.toggle('no-time', !state.settings.showTimestamps);
+  document.documentElement.style.setProperty('--chat-font', chatFontStack());
+}
 
 // A "target" is a channel, DM, or the server console.
 // { name, kind: 'channel'|'dm'|'server', topic, messages: [], members: Map<lower,member>, unread, highlight }
@@ -43,10 +85,19 @@ function loadSavedServers() {
   } catch (_) { return []; }
 }
 function persistServers() {
+  // Passwords are NOT stored here — they live in the OS-encrypted secret store,
+  // keyed by server id. We only persist a flag so the UI knows one exists.
   const data = state.servers.map((s) => ({
     id: s.id, name: s.name, host: s.host, port: s.port, tls: s.tls,
     tlsInsecure: s.tlsInsecure, nick: s.nick, realname: s.realname,
-    channelsToJoin: s.channelsToJoin, pass: s.pass || '',
+    channelsToJoin: s.channelsToJoin,
+    hasPassword: !!(s.hasPassword || s.pass),
+    ssh: s.ssh ? {
+      enabled: s.ssh.enabled, host: s.ssh.host, port: s.ssh.port,
+      username: s.ssh.username, auth: s.ssh.auth,
+      hasPassword: !!s.ssh.hasPassword, hasKey: !!s.ssh.hasKey,
+      hasPassphrase: !!s.ssh.hasPassphrase, pinnedHostKey: s.ssh.pinnedHostKey || '',
+    } : null,
   }));
   savePref('netsplit.servers', JSON.stringify(data));
 }
@@ -109,8 +160,11 @@ function serverConsole(server) {
 }
 
 function formatTime(date) {
-  let h = date.getHours();
   const m = date.getMinutes().toString().padStart(2, '0');
+  if (state.settings.clock === '24h') {
+    return `${date.getHours().toString().padStart(2, '0')}:${m}`;
+  }
+  let h = date.getHours();
   const ampm = h >= 12 ? 'PM' : 'AM';
   h = h % 12; if (h === 0) h = 12;
   return `${h}:${m} ${ampm}`;
@@ -158,6 +212,7 @@ function addMessage(server, targetName, msg) {
 // Desktop notification for a direct message or a highlight, when the relevant
 // conversation isn't already in front of the user.
 function maybeNotify(server, target, message) {
+  if (!state.settings.notifications) return;
   if (typeof Notification === 'undefined') return;
   if (message.type === 'system' || message.type === 'self') return;
   if (isMe(server, message.sender)) return;
@@ -221,6 +276,8 @@ function addServerProfile(profile) {
     nick: profile.nick,
     realname: profile.realname || profile.nick,
     pass: profile.pass || '',
+    hasPassword: !!profile.hasPassword,
+    ssh: profile.ssh || null,
     channelsToJoin: profile.channelsToJoin || [],
     status: 'disconnected',
     features: {},
@@ -245,14 +302,45 @@ async function connectServer(server) {
   server.reconnectAttempts = 0;
   server.status = 'connecting';
   server.registered = false;
-  systemMessage(server, server.name, `Connecting to ${server.host}:${server.port}…`);
+  const via = server.ssh && server.ssh.enabled ? ` via SSH ${server.ssh.username}@${server.ssh.host}` : '';
+  systemMessage(server, server.name, `Connecting to ${server.host}:${server.port}${via}…`);
   renderSidebar();
-  await window.netsplit.connect(server.id, {
-    host: server.host,
-    port: server.port,
-    tls: server.tls,
-    tlsInsecure: server.tlsInsecure,
-  });
+  await resolveSecrets(server);
+  await window.netsplit.connect(server.id, buildConnectOptions(server));
+}
+
+// Pull decrypted secrets into memory just before connecting.
+async function resolveSecrets(server) {
+  if (server.hasPassword && !server.pass) {
+    try { server.pass = (await window.netsplit.secretGet(server.id)) || ''; } catch (_) {}
+  }
+  const s = server.ssh;
+  if (s && s.enabled) {
+    if (s.hasPassword && !s._password) {
+      try { s._password = (await window.netsplit.secretGet(server.id + ':ssh:pass')) || ''; } catch (_) {}
+    }
+    if (s.hasKey && !s._privateKey) {
+      try { s._privateKey = (await window.netsplit.secretGet(server.id + ':ssh:key')) || ''; } catch (_) {}
+    }
+    if (s.hasPassphrase && !s._passphrase) {
+      try { s._passphrase = (await window.netsplit.secretGet(server.id + ':ssh:passphrase')) || ''; } catch (_) {}
+    }
+  }
+}
+
+function buildConnectOptions(server) {
+  const opts = {
+    host: server.host, port: server.port, tls: server.tls, tlsInsecure: server.tlsInsecure,
+  };
+  const s = server.ssh;
+  if (s && s.enabled) {
+    opts.ssh = {
+      host: s.host, port: s.port || 22, username: s.username, auth: s.auth,
+      password: s._password || '', privateKey: s._privateKey || '',
+      passphrase: s._passphrase || '', pinnedHostKey: s.pinnedHostKey || '',
+    };
+  }
+  return opts;
 }
 
 // Auto-reconnect with capped exponential backoff after an unexpected drop.
@@ -267,15 +355,14 @@ function scheduleReconnect(server) {
   const delay = Math.min(3000 * 2 ** (server.reconnectAttempts - 1), 90000);
   systemMessage(server, server.name,
     `Reconnecting in ${Math.round(delay / 1000)}s (attempt ${server.reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})…`);
-  server.reconnectTimer = setTimeout(() => {
+  server.reconnectTimer = setTimeout(async () => {
     server.reconnectTimer = null;
     if (server.manualDisconnect) return;
     server.status = 'connecting';
     server.registered = false;
     renderSidebar();
-    window.netsplit.connect(server.id, {
-      host: server.host, port: server.port, tls: server.tls, tlsInsecure: server.tlsInsecure,
-    });
+    await resolveSecrets(server);
+    window.netsplit.connect(server.id, buildConnectOptions(server));
   }, delay);
 }
 
@@ -305,6 +392,13 @@ window.netsplit.onEvent(({ id, event, payload }) => {
       break;
     case 'line':
       handleLine(server, payload.line);
+      break;
+    case 'sshHostKey':
+      if (server.ssh) {
+        server.ssh.pinnedHostKey = payload.fingerprint;
+        persistServers();
+        systemMessage(server, server.name, `Pinned SSH host key: ${payload.fingerprint}`);
+      }
       break;
     case 'error':
       systemMessage(server, server.name, `Error: ${payload.message}`);
@@ -1079,7 +1173,7 @@ function openQuery(server, nickname) {
 }
 
 function nickColor(key) {
-  if (!state.palette) return 'var(--accent)';
+  if (!state.settings.coloredNicks || !state.palette) return 'var(--accent)';
   return Themes.nicknameColor(key, state.palette);
 }
 
@@ -1231,10 +1325,19 @@ function wireUI() {
   el('emptyAdd').onclick = () => openConnectModal();
   el('connectCancel').onclick = () => closeModal('connectModal');
   el('connectForm').onsubmit = onConnectSubmit;
+  el('fSsh').onchange = toggleSshFields;
+  el('fSshAuth').onchange = toggleSshFields;
 
   // Theme
   el('themeBtn').onclick = openThemeModal;
   el('themeClose').onclick = () => closeModal('themeModal');
+
+  // Settings
+  el('settingsBtn').onclick = openSettings;
+  el('settingsClose').onclick = () => closeModal('settingsModal');
+  document.querySelectorAll('.segmented button').forEach((b) => {
+    b.onclick = () => setSetting(b.parentElement.dataset.setting, b.dataset.value);
+  });
 
   // Members toggle
   dom.toggleMembers.onclick = () => {
@@ -1277,23 +1380,74 @@ function wireUI() {
 }
 
 function closeAllModals() {
-  closeModal('connectModal'); closeModal('themeModal');
+  closeModal('connectModal'); closeModal('themeModal'); closeModal('settingsModal');
   closeModal('paletteModal'); closeModal('listModal');
 }
 
 function openConnectModal() {
   el('connectModal').hidden = false;
+  toggleSshFields();
   el('fHost').focus();
 }
 
-function onConnectSubmit(e) {
+function toggleSshFields() {
+  const on = el('fSsh').checked;
+  el('fSshFields').hidden = !on;
+  const key = el('fSshAuth').value === 'key';
+  el('fSshPassRow').hidden = key;
+  el('fSshKeyRows').hidden = !key;
+}
+
+// Encrypt+persist a secret; returns whether it was stored durably. When the OS
+// secure store is unavailable, we keep it in memory only and warn.
+async function storeSecret(key, value) {
+  if (!value) { try { await window.netsplit.secretDelete(key); } catch (_) {} return false; }
+  try {
+    const r = await window.netsplit.secretSet(key, value);
+    if (!r.available) {
+      systemToast('OS secure storage unavailable — secret kept for this session only.');
+      return false;
+    }
+    return !!r.ok;
+  } catch (_) { return false; }
+}
+
+async function onConnectSubmit(e) {
   e.preventDefault();
   const host = el('fHost').value.trim();
   const nick = el('fNick').value.trim();
   if (!host || !nick) return;
   const channels = el('fChannels').value.split(/[\s,]+/).map((c) => c.trim()).filter(Boolean)
     .map((c) => (isChannelName(c, {}) ? c : `#${c}`));
+  const id = uid();
+
+  // IRC server password → encrypted secret store.
+  const ircPass = el('fPass').value;
+  const hasPassword = ircPass ? await storeSecret(id, ircPass) : false;
+
+  // Optional SSH tunnel.
+  let ssh = null;
+  let sshPass = '', sshKey = '', sshPassphrase = '';
+  if (el('fSsh') && el('fSsh').checked) {
+    const auth = el('fSshAuth').value; // 'password' | 'key'
+    sshPass = el('fSshPass').value;
+    sshKey = el('fSshKey').value;
+    sshPassphrase = el('fSshPassphrase').value;
+    ssh = {
+      enabled: true,
+      host: el('fSshHost').value.trim(),
+      port: parseInt(el('fSshPort').value, 10) || 22,
+      username: el('fSshUser').value.trim(),
+      auth,
+      hasPassword: auth === 'password' && sshPass ? await storeSecret(id + ':ssh:pass', sshPass) : false,
+      hasKey: auth === 'key' && sshKey ? await storeSecret(id + ':ssh:key', sshKey) : false,
+      hasPassphrase: auth === 'key' && sshPassphrase ? await storeSecret(id + ':ssh:passphrase', sshPassphrase) : false,
+      pinnedHostKey: '',
+    };
+  }
+
   const profile = {
+    id,
     name: el('fName').value.trim() || host,
     host,
     port: parseInt(el('fPort').value, 10) || (el('fTls').checked ? 6697 : 6667),
@@ -1301,17 +1455,31 @@ function onConnectSubmit(e) {
     tlsInsecure: el('fInsecure').checked,
     nick,
     realname: el('fReal').value.trim() || nick,
-    pass: el('fPass').value,
     channelsToJoin: channels,
+    hasPassword,
+    ssh,
   };
   closeModal('connectModal');
   const server = addServerProfile(profile);
+  // Keep secrets in memory for this session so the first connect works even if
+  // durable storage was unavailable.
+  server.pass = ircPass || '';
+  if (server.ssh) {
+    server.ssh._password = sshPass || '';
+    server.ssh._privateKey = sshKey || '';
+    server.ssh._passphrase = sshPassphrase || '';
+  }
   persistServers();
   selectTarget(server.id, server.name);
   connectServer(server);
   el('connectForm').reset();
+  resetConnectDefaults();
+}
+
+function resetConnectDefaults() {
   el('fPort').value = '6697';
   el('fTls').checked = true;
+  if (el('fSsh')) { el('fSsh').checked = false; toggleSshFields(); }
 }
 
 function openThemeModal() {
@@ -1333,6 +1501,31 @@ function openThemeModal() {
     grid.appendChild(sw);
   }
   el('themeModal').hidden = false;
+}
+
+// --- Settings ---
+function openSettings() {
+  refreshSettingsUI();
+  el('settingsModal').hidden = false;
+}
+function refreshSettingsUI() {
+  document.querySelectorAll('.segmented').forEach((seg) => {
+    const key = seg.dataset.setting;
+    const cur = String(state.settings[key]);
+    seg.querySelectorAll('button').forEach((b) => b.classList.toggle('active', b.dataset.value === cur));
+  });
+}
+function setSetting(key, rawValue) {
+  if (!(key in SETTING_FIELDS)) return;
+  let value = rawValue;
+  if (rawValue === 'true') value = true;
+  else if (rawValue === 'false') value = false;
+  state.settings[key] = value;
+  saveSettings();
+  applySettings();
+  renderTranscript();
+  renderMembers();
+  refreshSettingsUI();
 }
 
 // --- Channel list browser (/list) ---
@@ -1451,6 +1644,7 @@ function disconnectServer(server) {
 
 function removeServer(server) {
   disconnectServer(server);
+  try { window.netsplit.secretDelete(server.id); } catch (_) {}
   const idx = state.servers.findIndex((s) => s.id === server.id);
   if (idx !== -1) state.servers.splice(idx, 1);
   persistServers();
@@ -1622,16 +1816,27 @@ async function boot() {
     document.body.classList.add('not-mac');
   }
   loadPrefs();
+  loadSettings();
   try { state.systemIsDark = await window.netsplit.systemIsDark(); } catch (_) {}
   applyThemeKey(state.themeKey);
+  applySettings();
   wireUI();
 
   // Restore saved server profiles (not auto-connected).
   const saved = loadSavedServers();
+  let migrated = false;
   for (const p of saved) {
     const server = addServerProfile(p);
-    systemMessage(server, server.name, 'Saved connection. Use the server row to reconnect.');
+    // Migrate any legacy plaintext password into the encrypted secret store.
+    if (p.pass) {
+      const ok = await storeSecret(server.id, p.pass);
+      server.hasPassword = ok || true;
+      server.pass = p.pass;
+      migrated = true;
+    }
+    systemMessage(server, server.name, 'Saved connection. Double-click the server row (or /connect) to reconnect.');
   }
+  if (migrated) persistServers(); // rewrite without plaintext passwords
   if (state.servers.length) {
     selectTarget(state.servers[0].id, state.servers[0].name);
   } else {

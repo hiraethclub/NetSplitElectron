@@ -350,6 +350,21 @@ body.not-mac .toolbar-nav { padding-left: 0; }
 .modal .row .grow { flex: 1; }
 .modal .row .port { width: 96px; }
 .checks { display: flex; gap: 18px; margin: 4px 0 6px; }
+.modal textarea {
+  display: block; width: 100%; margin-top: 5px;
+  background: var(--field); border: 1px solid var(--border); border-radius: 8px;
+  color: var(--text); padding: 8px 10px; font-size: 12.5px; font-family: var(--mono-stack);
+  outline: none; resize: vertical; -webkit-user-select: text; user-select: text;
+}
+.modal select {
+  display: block; width: 100%; margin-top: 5px;
+  background: var(--field); border: 1px solid var(--border); border-radius: 8px;
+  color: var(--text); padding: 8px 10px; font-size: 13.5px; font-family: inherit; outline: none;
+}
+.ssh-toggle { margin: 8px 0 2px; }
+.ssh-fields { border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px 4px; margin-bottom: 6px; }
+.ssh-fields[hidden] { display: none; }
+.ssh-note { font-size: 11.5px; color: var(--secondary-text); margin: 2px 0 8px; line-height: 1.4; }
 .check { display: flex !important; align-items: center; gap: 6px; color: var(--text); font-size: 13px; }
 .check input { margin: 0; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 14px; }
@@ -399,6 +414,29 @@ body.not-mac .toolbar-nav { padding-left: 0; }
 .palette-item.active .pi-icon { color: var(--prominent-button-text); }
 .palette-item .pi-sub { margin-left: auto; font-size: 11px; color: var(--secondary-text); }
 .palette-item.active .pi-sub { color: var(--prominent-button-text); opacity: 0.8; }
+
+/* Chat font applied to the message area (user setting) */
+.msg .nick, .msg .body { font-family: var(--chat-font, var(--font-stack)); }
+
+/* Message spacing (compact setting) */
+.transcript.compact .msg { padding-top: 0; padding-bottom: 0; line-height: 1.32; }
+
+/* Hide timestamps setting: drop the time column entirely */
+.transcript.no-time .msg { grid-template-columns: 148px 1fr; }
+.transcript.no-time .time { display: none; }
+.transcript.no-time .msg.system .body { grid-column: 2 / 3; }
+
+/* Settings panel */
+.settings-grid { display: flex; flex-direction: column; gap: 12px; }
+.setting-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.setting-row > label { color: var(--text); font-size: 13.5px; margin: 0; }
+.segmented { display: inline-flex; background: var(--field); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.segmented button {
+  background: transparent; border: none; color: var(--secondary-text);
+  padding: 6px 12px; font-size: 12.5px; font-family: inherit;
+}
+.segmented button:hover { color: var(--text); }
+.segmented button.active { background: var(--accent); color: var(--prominent-button-text); }
 
 /* Clickable nickname in the transcript */
 .clickable-nick { cursor: pointer; }

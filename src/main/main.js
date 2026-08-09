@@ -1,8 +1,35 @@
 'use strict';
 
-const { app, BrowserWindow, ipcMain, Menu, shell, nativeTheme } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, shell, nativeTheme, safeStorage } = require('electron');
 const path = require('path');
+const fs = require('fs');
 const { IRCConnection } = require('./ircConnection');
+
+// ---------------------------------------------------------------------------
+// Secrets: OS-encrypted at rest via Electron safeStorage (macOS Keychain,
+// Windows DPAPI, Linux libsecret/kwallet). Stored as base64 ciphertext in a
+// JSON file under userData. Never written in plaintext.
+// ---------------------------------------------------------------------------
+
+let secretsCache = null;
+function secretsPath() { return path.join(app.getPath('userData'), 'secrets.json'); }
+function loadSecrets() {
+  if (secretsCache) return secretsCache;
+  try {
+    secretsCache = JSON.parse(fs.readFileSync(secretsPath(), 'utf8'));
+  } catch (_) {
+    secretsCache = {};
+  }
+  return secretsCache;
+}
+function writeSecrets() {
+  try {
+    fs.writeFileSync(secretsPath(), JSON.stringify(loadSecrets()), { mode: 0o600 });
+  } catch (_) { /* ignore */ }
+}
+function secretsAvailable() {
+  try { return safeStorage.isEncryptionAvailable(); } catch (_) { return false; }
+}
 
 /** @type {Map<string, IRCConnection>} */
 const connections = new Map();
@@ -46,6 +73,24 @@ function createWindow() {
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
+
+  // Headless eval hook (tests only): run a JS file in the renderer against the
+  // real IPC handlers, print its result, and quit. Gated by env var.
+  if (process.env.NETSPLIT_EVAL) {
+    mainWindow.webContents.on('did-finish-load', () => {
+      setTimeout(async () => {
+        try {
+          const code = require('fs').readFileSync(process.env.NETSPLIT_EVAL, 'utf8');
+          const result = await mainWindow.webContents.executeJavaScript(code);
+          console.log('EVAL_RESULT ' + JSON.stringify(result));
+          app.exit(0);
+        } catch (e) {
+          console.log('EVAL_ERROR ' + e.message);
+          app.exit(1);
+        }
+      }, 1200);
+    });
+  }
 
   // Headless smoke test: capture renderer errors, screenshot, then quit.
   if (process.env.NETSPLIT_SMOKE) {
@@ -115,6 +160,46 @@ ipcMain.handle('irc:openExternal', (_event, { url }) => {
 
 ipcMain.handle('theme:systemIsDark', () => {
   return nativeTheme.shouldUseDarkColors;
+});
+
+ipcMain.handle('secret:available', () => secretsAvailable());
+
+ipcMain.handle('secret:set', (_event, { key, value }) => {
+  const store = loadSecrets();
+  if (!value) {
+    delete store[key];
+    writeSecrets();
+    return { ok: true, available: secretsAvailable() };
+  }
+  if (!secretsAvailable()) return { ok: false, available: false };
+  try {
+    store[key] = safeStorage.encryptString(String(value)).toString('base64');
+    writeSecrets();
+    return { ok: true, available: true };
+  } catch (err) {
+    return { ok: false, available: true, error: err.message };
+  }
+});
+
+ipcMain.handle('secret:get', (_event, { key }) => {
+  const store = loadSecrets();
+  const enc = store[key];
+  if (!enc) return '';
+  try {
+    return safeStorage.decryptString(Buffer.from(enc, 'base64'));
+  } catch (_) {
+    return '';
+  }
+});
+
+ipcMain.handle('secret:delete', (_event, { key }) => {
+  const store = loadSecrets();
+  // Delete the key and any namespaced children (e.g. "<id>:ssh:pass").
+  for (const k of Object.keys(store)) {
+    if (k === key || k.startsWith(key + ':')) delete store[k];
+  }
+  writeSecrets();
+  return { ok: true };
 });
 
 ipcMain.handle('window:focus', () => {

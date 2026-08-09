@@ -17,6 +17,7 @@
     <div class="toolbar-title" id="toolbarTitle">Netsplit</div>
     <div class="toolbar-actions">
       <button class="icon-btn" id="themeBtn" title="Theme" aria-label="Theme">&#9681;</button>
+      <button class="icon-btn" id="settingsBtn" title="Settings" aria-label="Settings">&#9881;</button>
       <button class="icon-btn" id="toggleMembers" title="Toggle member list" aria-label="Toggle member list">&#9776;</button>
     </div>
   </header>
@@ -104,6 +105,42 @@
           <label class="check"><input type="checkbox" id="fTls" checked /> Use TLS (SSL)</label>
           <label class="check"><input type="checkbox" id="fInsecure" /> Accept invalid certificates</label>
         </div>
+
+        <label class="check ssh-toggle"><input type="checkbox" id="fSsh" /> Connect through an SSH tunnel</label>
+        <div id="fSshFields" class="ssh-fields" hidden>
+          <div class="row">
+            <label class="grow">SSH server
+              <input type="text" id="fSshHost" placeholder="bastion.example.com" />
+            </label>
+            <label class="port">Port
+              <input type="number" id="fSshPort" value="22" min="1" max="65535" />
+            </label>
+          </div>
+          <div class="row">
+            <label class="grow">SSH username
+              <input type="text" id="fSshUser" placeholder="user" />
+            </label>
+            <label class="port" style="width:130px">Auth
+              <select id="fSshAuth">
+                <option value="password">Password</option>
+                <option value="key">Private key</option>
+              </select>
+            </label>
+          </div>
+          <label id="fSshPassRow">SSH password
+            <input type="password" id="fSshPass" autocomplete="off" />
+          </label>
+          <div id="fSshKeyRows" hidden>
+            <label>Private key (PEM / OpenSSH, Ed25519 or RSA)
+              <textarea id="fSshKey" rows="4" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----" autocomplete="off"></textarea>
+            </label>
+            <label>Key passphrase (optional)
+              <input type="password" id="fSshPassphrase" autocomplete="off" />
+            </label>
+          </div>
+          <p class="ssh-note">The SSH host key is pinned on first connect (trust-on-first-use). Secrets are stored with your OS keychain.</p>
+        </div>
+
         <div class="modal-actions">
           <button type="button" class="ghost-btn" id="connectCancel">Cancel</button>
           <button type="submit" class="prominent-btn">Connect</button>
@@ -119,6 +156,61 @@
       <div class="theme-grid" id="themeGrid"></div>
       <div class="modal-actions">
         <button type="button" class="ghost-btn" id="themeClose">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings -->
+  <div class="modal-backdrop" id="settingsModal" hidden>
+    <div class="modal">
+      <h2>Settings</h2>
+      <div class="settings-grid">
+        <div class="setting-row">
+          <label>Message spacing</label>
+          <div class="segmented" id="setSpacing" data-setting="spacing">
+            <button data-value="comfortable">Comfortable</button>
+            <button data-value="compact">Compact</button>
+          </div>
+        </div>
+        <div class="setting-row">
+          <label>Chat font</label>
+          <div class="segmented" id="setChatFont" data-setting="chatFont">
+            <button data-value="system">System</button>
+            <button data-value="rounded">Rounded</button>
+            <button data-value="monospaced">Mono</button>
+          </div>
+        </div>
+        <div class="setting-row">
+          <label>Clock</label>
+          <div class="segmented" id="setClock" data-setting="clock">
+            <button data-value="12h">12-hour</button>
+            <button data-value="24h">24-hour</button>
+          </div>
+        </div>
+        <div class="setting-row">
+          <label>Show timestamps</label>
+          <div class="segmented" id="setShowTimestamps" data-setting="showTimestamps">
+            <button data-value="true">On</button>
+            <button data-value="false">Off</button>
+          </div>
+        </div>
+        <div class="setting-row">
+          <label>Colored nicknames</label>
+          <div class="segmented" id="setColoredNicks" data-setting="coloredNicks">
+            <button data-value="true">On</button>
+            <button data-value="false">Off</button>
+          </div>
+        </div>
+        <div class="setting-row">
+          <label>Desktop notifications</label>
+          <div class="segmented" id="setNotifications" data-setting="notifications">
+            <button data-value="true">On</button>
+            <button data-value="false">Off</button>
+          </div>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="ghost-btn" id="settingsClose">Done</button>
       </div>
     </div>
   </div>

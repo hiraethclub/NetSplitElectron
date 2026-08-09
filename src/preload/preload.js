@@ -11,6 +11,12 @@ contextBridge.exposeInMainWorld('netsplit', {
   systemIsDark: () => ipcRenderer.invoke('theme:systemIsDark'),
   focusWindow: () => ipcRenderer.invoke('window:focus'),
 
+  // OS-encrypted secret storage.
+  secretAvailable: () => ipcRenderer.invoke('secret:available'),
+  secretSet: (key, value) => ipcRenderer.invoke('secret:set', { key, value }),
+  secretGet: (key) => ipcRenderer.invoke('secret:get', { key }),
+  secretDelete: (key) => ipcRenderer.invoke('secret:delete', { key }),
+
   // Socket lifecycle + raw lines from a connection.
   onEvent: (handler) => {
     const listener = (_e, data) => handler(data);

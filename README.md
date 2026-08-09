@@ -51,21 +51,25 @@ follow-ups below.
 - **Composer niceties**: input history (↑/↓), Tab completion for both command
   names and nicknames (repeat Tab to cycle), click a nickname to open a DM, and
   link detection that opens in the system browser.
+- **SSH tunnel connections**: reach an IRC network through an SSH bastion with a
+  local port-forward. Password or private-key (Ed25519 / RSA) auth, optional key
+  passphrase, and trust-on-first-use host-key pinning (a changed host key aborts
+  the connection).
+- **Secure credential storage**: server and SSH passwords, private keys, and key
+  passphrases are encrypted at rest with the OS keychain via Electron
+  `safeStorage` (macOS Keychain, Windows DPAPI, Linux libsecret/kwallet) — never
+  written to disk in plain text. If no OS keychain is available, secrets are kept
+  in memory for the session only and you're warned.
+- **Settings** (⚙): message spacing (compact/comfortable), chat font
+  (system/rounded/monospaced), 12- or 24-hour clock, show/hide timestamps,
+  colored nicknames, and desktop-notification toggle — all persisted.
 - **Demo Server** — an offline sample network (File → Load Demo Server) so you
   can preview the client without connecting.
 
 ### Deferred (follow-ups)
 
-These exist in the native app and rely on macOS-specific facilities; they are not
-in this first port:
-
-- **SSH tunnel connections** (password / Ed25519 key, host-key pinning).
-- **macOS Keychain** storage for passwords and on-connect commands. This port
-  stores server profiles in the renderer's `localStorage`; **passwords entered in
-  the connect dialog are saved there in plain text**, so treat that as a
-  convenience, not secure storage, until a proper secret store is wired in.
 - Rich link-preview cards, the full 40+ moderation command set, and per-server
-  on-connect automation.
+  on-connect automation (e.g. NickServ/ChanServ scripts).
 
 ## Running
 
@@ -94,8 +98,8 @@ signing and additional target formats.
 ```
 src/
   main/
-    main.js            Electron main process: window, menu, IPC, lifecycle
-    ircConnection.js   One TCP/TLS socket per server; line framing only
+    main.js            Electron main process: window, menu, IPC, safeStorage
+    ircConnection.js   One TCP/TLS socket per server (optionally via SSH tunnel)
   preload/
     preload.js         contextBridge surface (no Node access in renderer)
   renderer/
