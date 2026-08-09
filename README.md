@@ -32,9 +32,11 @@ follow-ups below.
 - **Channels & DMs**: join/part, topics, NAMES, JOIN/PART/QUIT/KICK/NICK/MODE
   tracking, private messages, server notices, unread badges, and mention
   highlighting.
-- **Commands**: `/join /part /msg /query /me /notice /nick /topic /whois /who
-  /mode /kick /invite /away /quit /clear /raw` and pass-through of any other
-  command straight to the server.
+- **Commands**: `/server /join /part /msg /query /me /notice /nick /topic /whois
+  /who /mode /kick /invite /away /quit /connect /clear /raw` and pass-through of
+  any other command straight to the server. You can connect entirely by typing —
+  `/server irc.libera.chat` opens a network, then `/join #channel` from the
+  server console — no dialog required.
 - **Command palette** (⌘/Ctrl+K) to jump between servers, channels, and DMs.
 - **Composer niceties**: input history (↑/↓), tab nickname completion, link
   detection that opens in the system browser.

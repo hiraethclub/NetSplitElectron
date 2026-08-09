@@ -552,17 +552,66 @@ function currentSelectionRefs() {
 }
 
 function sendComposer() {
-  const refs = currentSelectionRefs();
-  if (!refs) return;
   const text = dom.composerInput.value;
   if (!text.trim()) return;
   dom.composerInput.value = '';
   recordHistory(text);
+
+  // /server works with or without a current selection, so it's handled here
+  // (before we require a selected server) — this is how you connect by typing.
+  const globalMatch = text.match(/^\/server\b\s*(.*)$/is);
+  if (globalMatch) {
+    const refs = currentSelectionRefs();
+    connectNewServer(globalMatch[1].trim(), refs ? refs.server : null);
+    return;
+  }
+
+  const refs = currentSelectionRefs();
+  if (!refs) {
+    // No servers yet: point the user at the one command that bootstraps one.
+    systemToast('Type /server irc.libera.chat to connect, or press + to add a connection.');
+    return;
+  }
   if (text.startsWith('/')) {
     executeCommand(refs.server, refs.target, text);
   } else {
     sendMessageText(refs.server, refs.target, text);
   }
+}
+
+// Connect to a new network by command: /server <host> [port] [nick].
+// Port 6697 (default) is treated as TLS; classic plain ports connect without.
+function connectNewServer(arg, reportServer) {
+  const tokens = arg.split(/\s+/).filter(Boolean);
+  if (!tokens.length) {
+    const usage = 'Usage: /server <host> [port] [nick]  —  port 6697 = TLS, 6667 = plain';
+    if (reportServer) systemMessage(reportServer, reportServer.name, usage);
+    else systemToast(usage);
+    return;
+  }
+  const host = tokens[0];
+  const port = tokens[1] ? (parseInt(tokens[1], 10) || 6697) : 6697;
+  const plainPorts = [6667, 6666, 6668, 6669, 8001];
+  const tls = !plainPorts.includes(port);
+  const nick = tokens[2] || (reportServer && reportServer.nick) ||
+    ('guest' + Math.floor(Math.random() * 9000 + 1000));
+  const server = addServerProfile({
+    name: host, host, port, tls, tlsInsecure: false,
+    nick, realname: nick, channelsToJoin: [],
+  });
+  persistServers();
+  selectTarget(server.id, server.name);
+  connectServer(server);
+}
+
+// Lightweight transient message when there's no conversation to write into.
+function systemToast(text) {
+  const t = document.createElement('div');
+  t.className = 'toast';
+  t.textContent = text;
+  document.body.appendChild(t);
+  setTimeout(() => t.classList.add('show'), 10);
+  setTimeout(() => { t.classList.remove('show'); setTimeout(() => t.remove(), 300); }, 4000);
 }
 
 function sendMessageText(server, target, text) {
@@ -584,7 +633,18 @@ function executeCommand(server, target, input) {
   const arg = parts[1] || '';
   const targetName = target ? target.name : server.name;
 
+  // Commands that need a live connection; the rest work offline.
+  const offlineOk = new Set(['CLEAR', 'SERVER', 'CONNECT', 'RECONNECT', 'RAW', 'QUOTE']);
+  if (!offlineOk.has(command) && server.status !== 'connected') {
+    systemMessage(server, targetName,
+      'Not connected. Select the server and use /connect, or /server <host> to open a new one.');
+    return;
+  }
+
   switch (command) {
+    case 'SERVER':
+      connectNewServer(arg, server);
+      break;
     case 'JOIN': case 'J': {
       const ch = arg.split(/\s+/)[0];
       if (!ch) { systemMessage(server, targetName, 'Usage: /join #channel'); return; }
@@ -965,14 +1025,16 @@ function buildMemberRow(server, m) {
 
 function updateComposerState() {
   const refs = currentSelectionRefs();
-  const canSend = refs && refs.target && refs.target.kind !== 'server';
-  dom.composerInput.disabled = !canSend;
-  dom.sendBtn.disabled = !canSend;
+  // The composer is always usable so commands (/join, /server, …) can be typed
+  // from the server console — or even before any connection exists.
+  dom.composerInput.disabled = false;
+  dom.sendBtn.disabled = false;
   if (refs && refs.target) {
     dom.composerInput.placeholder = refs.target.kind === 'server'
-      ? 'Select a channel or DM' : `Message ${refs.target.name}`;
+      ? 'Message the server or type a command  (e.g. /join #channel)'
+      : `Message ${refs.target.name}`;
   } else {
-    dom.composerInput.placeholder = 'Message';
+    dom.composerInput.placeholder = 'Type /server irc.libera.chat to connect';
   }
 }
 
