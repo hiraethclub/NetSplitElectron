@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self';" />
+  <title>Netsplit</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- Top toolbar -->
+  <header class="toolbar" id="toolbar">
+    <div class="toolbar-nav">
+      <button class="icon-btn" id="navBack" title="Back" aria-label="Back">&#8249;</button>
+      <button class="icon-btn" id="navForward" title="Forward" aria-label="Forward">&#8250;</button>
+    </div>
+    <div class="toolbar-title" id="toolbarTitle">Netsplit</div>
+    <div class="toolbar-actions">
+      <button class="icon-btn" id="themeBtn" title="Theme" aria-label="Theme">&#9681;</button>
+      <button class="icon-btn" id="toggleMembers" title="Toggle member list" aria-label="Toggle member list">&#9776;</button>
+    </div>
+  </header>
+
+  <div class="workspace">
+    <!-- Connections sidebar -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <span class="sidebar-header-icon">&#9678;</span>
+        <span id="connectionsTitle">Connections</span>
+      </div>
+      <div class="sidebar-scroll" id="sidebarList"></div>
+      <div class="sidebar-footer">
+        <button class="icon-btn" id="addConnection" title="Add connection">+</button>
+        <span class="sidebar-footer-status" id="activeCount">0 active</span>
+      </div>
+    </aside>
+
+    <!-- Conversation column -->
+    <main class="conversation" id="conversation">
+      <div class="conversation-header" id="conversationHeader">
+        <div class="conversation-avatar" id="conversationAvatar">#</div>
+        <div class="conversation-heading">
+          <div class="conversation-title" id="conversationTitle">Netsplit</div>
+          <div class="conversation-subtitle" id="conversationSubtitle">Not connected</div>
+        </div>
+      </div>
+
+      <div class="transcript" id="transcript">
+        <div class="empty-state" id="emptyState">
+          <h1 id="emptyTitle">Connections</h1>
+          <p id="emptyBody">Choose a network to connect, or add a profile for your own server. Active networks and their channels stay focused in the sidebar.</p>
+          <button class="prominent-btn" id="emptyAdd">Add Connection…</button>
+        </div>
+      </div>
+
+      <div class="composer" id="composer">
+        <input type="text" id="composerInput" class="composer-input" placeholder="Message" autocomplete="off" spellcheck="true" disabled />
+        <button class="send-btn" id="sendBtn" title="Send" aria-label="Send" disabled>&#8593;</button>
+      </div>
+    </main>
+
+    <!-- Members sidebar -->
+    <aside class="members" id="members">
+      <div class="members-header">
+        <span>Members</span>
+        <span class="members-count" id="membersCount">0</span>
+      </div>
+      <input type="text" id="memberFilter" class="member-filter" placeholder="Filter members" autocomplete="off" />
+      <div class="members-scroll" id="membersList"></div>
+    </aside>
+  </div>
+
+  <!-- Add connection dialog -->
+  <div class="modal-backdrop" id="connectModal" hidden>
+    <div class="modal">
+      <h2 id="connectModalTitle">Add Connection</h2>
+      <form id="connectForm">
+        <label>Description
+          <input type="text" id="fName" placeholder="My Network" />
+        </label>
+        <div class="row">
+          <label class="grow">Server
+            <input type="text" id="fHost" placeholder="irc.libera.chat" required />
+          </label>
+          <label class="port">Port
+            <input type="number" id="fPort" value="6697" min="1" max="65535" />
+          </label>
+        </div>
+        <div class="row">
+          <label class="grow">Nickname
+            <input type="text" id="fNick" placeholder="yournick" required />
+          </label>
+          <label class="grow">Real name
+            <input type="text" id="fReal" placeholder="Netsplit user" />
+          </label>
+        </div>
+        <label>Channels (comma or space separated)
+          <input type="text" id="fChannels" placeholder="#netsplit, #irc" />
+        </label>
+        <label>Server password (optional)
+          <input type="password" id="fPass" placeholder="" autocomplete="off" />
+        </label>
+        <div class="checks">
+          <label class="check"><input type="checkbox" id="fTls" checked /> Use TLS (SSL)</label>
+          <label class="check"><input type="checkbox" id="fInsecure" /> Accept invalid certificates</label>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="ghost-btn" id="connectCancel">Cancel</button>
+          <button type="submit" class="prominent-btn">Connect</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Theme picker -->
+  <div class="modal-backdrop" id="themeModal" hidden>
+    <div class="modal small">
+      <h2>Appearance</h2>
+      <div class="theme-grid" id="themeGrid"></div>
+      <div class="modal-actions">
+        <button type="button" class="ghost-btn" id="themeClose">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Command palette -->
+  <div class="modal-backdrop palette-backdrop" id="paletteModal" hidden>
+    <div class="palette">
+      <input type="text" id="paletteInput" class="palette-input" placeholder="Jump to a channel, DM, or server…" autocomplete="off" />
+      <div class="palette-results" id="paletteResults"></div>
+    </div>
+  </div>
+
+  <script src="themes.js"></script>
+  <script src="ircProtocol.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
