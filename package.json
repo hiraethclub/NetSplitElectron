@@ -3,10 +3,14 @@
   "version": "0.1.0",
   "description": "NetSplitElectron — a modern IRC client. Electron port of the macOS Netsplit app, for Linux and Windows.",
   "main": "src/main/main.js",
-  "author": "",
+  "author": {
+    "name": "hiraethclub",
+    "email": "noreply@hiraeth.club"
+  },
   "license": "MIT",
   "scripts": {
     "start": "electron .",
+    "icon": "node scripts/generate-icon.js",
     "dist": "electron-builder",
     "dist:linux": "electron-builder --linux",
     "dist:win": "electron-builder --win"
@@ -19,8 +23,10 @@
     "electron-builder": "^24.13.3"
   },
   "build": {
-    "appId": "club.hiraeth.netsplit",
+    "appId": "club.hiraeth.netsplitelectron",
     "productName": "NetSplitElectron",
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
+    "icon": "build/icon.png",
     "files": [
       "src/**/*",
       "package.json"
@@ -30,12 +36,19 @@
         "AppImage",
         "deb"
       ],
-      "category": "Network"
+      "category": "Network",
+      "maintainer": "hiraethclub <noreply@hiraeth.club>",
+      "synopsis": "Cross-platform IRC client (Electron port of Netsplit)"
     },
     "win": {
       "target": [
         "nsis"
       ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true
     }
   }
 }
